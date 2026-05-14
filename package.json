@@ -1,0 +1,16 @@
+{
+  "name": "mapbox_lo_rem_test",
+  "version": "1.0.0",
+  "description": "Test effectiveness of locally loaded Mapbox tiles vs remotely loaded tiles",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["mapbox", "tiles", "performance", "local", "remote"],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.5.0"
+  }
+}
