@@ -1,0 +1,449 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Slovenia Map</title>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: rgba(11, 15, 25, 0.88);
+        --panel: rgba(18, 24, 38, 0.92);
+        --text: #edf2ff;
+        --muted: #8ea0c6;
+        --accent: #5dd1ff;
+        --accent-2: #89f0b3;
+        --border: rgba(255, 255, 255, 0.12);
+      }
+      html, body { height: 100%; margin: 0; font-family: Inter, system-ui, sans-serif; background: #0b1020; }
+      #map { position: absolute; inset: 0; }
+      #panel {
+        position: absolute;
+        z-index: 10;
+        top: 12px;
+        left: 12px;
+        width: min(420px, calc(100vw - 24px));
+        color: var(--text);
+        background: linear-gradient(180deg, rgba(16,22,36,.96), rgba(11,15,25,.92));
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+        backdrop-filter: blur(12px);
+        overflow: hidden;
+      }
+      #panel header {
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      #panel h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+      #panel .sub { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.3; }
+      #panel .content { padding: 14px 16px 16px; display: grid; gap: 12px; }
+      .row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .pill {
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.05);
+        color: var(--text);
+        padding: 8px 11px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: 0.2s ease;
+        user-select: none;
+      }
+      .pill:hover { transform: translateY(-1px); border-color: rgba(93,209,255,0.45); }
+      .pill.active { background: linear-gradient(135deg, rgba(93,209,255,0.18), rgba(137,240,179,0.16)); border-color: rgba(93,209,255,0.55); }
+      .pill:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
+      .meta { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+      .meta b { color: var(--text); }
+      .warn {
+        background: rgba(255, 188, 72, 0.12);
+        border: 1px solid rgba(255, 188, 72, 0.25);
+        color: #ffd28a;
+        padding: 10px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      #results {
+        position: absolute;
+        right: 12px;
+        bottom: 12px;
+        z-index: 10;
+        background: rgba(10, 14, 22, 0.82);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font: 12px/1.4 Consolas, monospace;
+        white-space: pre-wrap;
+        max-width: min(390px, calc(100vw - 24px));
+      }
+      .hint { color: var(--muted); font-size: 12px; }
+      .split { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <aside id="panel">
+      <header>
+        <h1>Slovenia Map</h1>
+        <div class="sub">Switch between remote and local streets, satellite, and 3D styles.</div>
+      </header>
+      <div class="content">
+        <div class="meta">
+          <div>Mode: <b id="modeLabel">Remote</b></div>
+          <div>Style: <b id="styleLabel">Streets</b></div>
+          <div>Zoom: <b id="zoomVal">7.00</b></div>
+          <div>Location: <b id="locVal">46.07, 14.55</b></div>
+          <div id="cacheIndicator" style="display: none; color: #ffd28a; font-weight: bold;">🔄 No-Cache Mode (Fresh Load)</div>
+        </div>
+
+        <div>
+          <div class="label">Connection</div>
+          <div class="row" id="modeButtons">
+            <button class="pill active" data-mode="remote">Remote</button>
+            <button class="pill" data-mode="local">Local</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="label">Style</div>
+          <div class="row" id="styleButtons">
+            <button class="pill active" data-style="streets">Streets</button>
+            <button class="pill" data-style="satellite">Satellite</button>
+            <button class="pill" data-style="3d">3D</button>
+          </div>
+        </div>
+
+        <div class="hint" id="availabilityHint">
+          Local raster needs <code>tiles/</code>, local satellite needs <code>tiles_sat/</code>, and local 3D needs <code>styles/streets-v12-local.json</code> plus glyph/vector assets.
+        </div>
+
+        {% if not token_ok %}
+        <div class="warn">MAPBOX_TOKEN is not set. Remote styles will not load.</div>
+        {% endif %}
+      </div>
+    </aside>
+
+    <div id="results">Loading timings...</div>
+
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script>
+      mapboxgl.accessToken = {{ mapbox_token|tojson }};
+      const bbox = {{ bbox|tojson }};
+      const centre = [{{ centre[1] }}, {{ centre[0] }}];
+      const maxZoom = {{ max_zoom }};
+      const hasLocalTiles = {{ has_local_tiles|tojson }};
+      const hasLocalSat = {{ has_local_sat|tojson }};
+      const hasLocal3d = {{ has_local_3d|tojson }};
+      const localTilesMaxZoom = {{ local_tiles_max_zoom|tojson }};
+      const localSatMaxZoom = {{ local_sat_max_zoom|tojson }};
+
+      // URL parameters for performance testing
+      const urlLat = {{ lat|tojson }};
+      const urlLon = {{ lon|tojson }};
+      const urlZoom = {{ zoom|tojson }};
+      const urlStyle = {{ style|tojson }};
+      const urlSource = {{ source|tojson }};
+      const urlNocache = new URLSearchParams(window.location.search).get('nocache') === '1';
+      const sessionId = (crypto.randomUUID && crypto.randomUUID()) || `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+      const state = {
+        mode: urlSource === 'local' ? 'local' : 'remote',
+        style: ['streets', 'satellite', '3d'].includes(urlStyle) ? urlStyle : 'streets'
+      };
+
+      // Cache busting suffix for nocache mode
+      const cacheParam = urlNocache ? '?nocache=1' : '';
+
+      // For local mode, start with a blank style to work offline.
+      // For remote mode, use Mapbox hosted style.
+      const initialStyle = (state.mode === 'local') 
+        ? { version: 8, sources: {}, layers: [] }
+        : 'mapbox://styles/mapbox/streets-v12';
+
+      const map = new mapboxgl.Map({
+        container: 'map',
+        style: initialStyle,
+        center: [urlLon, urlLat],
+        zoom: urlZoom,
+        minZoom: 6,
+        maxZoom: maxZoom,
+        maxBounds: [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+        // When `nocache` URL param is set, append a cache-busting query to remote requests
+        transformRequest: (url, resourceType) => {
+          if (!urlNocache) return { url };
+          // Only modify tile/style/asset requests — avoid touching unrelated URLs
+          const shouldBust = /api.mapbox.com|tiles|sprites|glyphs/.test(url) || resourceType === 'Tile' || resourceType === 'Source';
+          if (!shouldBust) return { url };
+          const sep = url.includes('?') ? '&' : '?';
+          return { url: url + sep + 'nocache=' + Date.now() };
+        }
+      });
+
+      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+      function updateLabels() {
+        document.getElementById('modeLabel').textContent = state.mode === 'local' ? 'Local' : 'Remote';
+        document.getElementById('styleLabel').textContent = state.style === '3d' ? '3D' : state.style.charAt(0).toUpperCase() + state.style.slice(1);
+      }
+
+      function setActiveButtons() {
+        document.querySelectorAll('[data-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === state.mode));
+        document.querySelectorAll('[data-style]').forEach(btn => btn.classList.toggle('active', btn.dataset.style === state.style));
+        document.querySelector('[data-style="satellite"]').disabled = state.mode === 'local' && !hasLocalSat;
+        document.querySelector('[data-style="3d"]').disabled = state.mode === 'local' && !hasLocal3d;
+      }
+
+      function clearLocalLayer() {
+        if (map.getLayer('local-raster')) map.removeLayer('local-raster');
+        if (map.getSource('local-raster')) map.removeSource('local-raster');
+      }
+
+      function addLocalRaster(tileUrl, maxzoom) {
+        clearLocalLayer();
+        map.addSource('local-raster', {
+          type: 'raster',
+          tiles: [tileUrl],
+          tileSize: 256,
+          maxzoom: maxzoom ?? localTilesMaxZoom ?? 14
+        });
+        map.addLayer({ id: 'local-raster', type: 'raster', source: 'local-raster' });
+      }
+
+      function add3dBuildings() {
+        const layers = map.getStyle().layers || [];
+        const labelLayerId = layers.find(l => l.type === 'symbol' && l.layout && l.layout['text-field']);
+        if (map.getLayer('3d-buildings')) return;
+        map.addLayer({
+          id: '3d-buildings',
+          source: 'composite',
+          'source-layer': 'building',
+          filter: ['==', 'extrude', 'true'],
+          type: 'fill-extrusion',
+          minzoom: 15,
+          paint: {
+            'fill-extrusion-color': '#a9b4c7',
+            'fill-extrusion-height': ['coalesce', ['to-number', ['get', 'height']], 0],
+            'fill-extrusion-base': ['coalesce', ['to-number', ['get', 'min_height']], 0],
+            'fill-extrusion-opacity': 0.72
+          }
+        }, labelLayerId && labelLayerId.id);
+      }
+
+      function isBlankStyleLoaded() {
+        const style = map.getStyle() || {};
+        const sourceCount = Object.keys(style.sources || {}).length;
+        const layerCount = (style.layers || []).length;
+        return map.isStyleLoaded() && sourceCount === 0 && layerCount === 0;
+      }
+
+      function applySelection() {
+        updateLabels();
+        setActiveButtons();
+
+        performance.clearResourceTimings();
+        timingStartTime = performance.now();
+        maxTileCount = 0;
+
+        const remoteStyles = {
+          streets: 'mapbox://styles/mapbox/streets-v12',
+          satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
+          '3d': 'mapbox://styles/mapbox/streets-v12'
+        };
+
+        if (state.mode === 'local') {
+          if (state.style === 'streets') {
+            if (isBlankStyleLoaded()) {
+              addLocalRaster(`/tiles/{z}/{x}/{y}.png${cacheParam}`, localTilesMaxZoom);
+            } else {
+              map.once('style.load', () => addLocalRaster(`/tiles/{z}/{x}/{y}.png${cacheParam}`, localTilesMaxZoom));
+              map.setStyle({ version: 8, sources: {}, layers: [] });
+            }
+            return;
+          }
+          if (state.style === 'satellite') {
+            if (isBlankStyleLoaded()) {
+              addLocalRaster(`/tiles_sat/{z}/{x}/{y}.png${cacheParam}`, localSatMaxZoom);
+            } else {
+              map.once('style.load', () => addLocalRaster(`/tiles_sat/{z}/{x}/{y}.png${cacheParam}`, localSatMaxZoom));
+              map.setStyle({ version: 8, sources: {}, layers: [] });
+            }
+            return;
+          }
+          if (state.style === '3d') {
+            if (hasLocal3d) {
+              map.setStyle('/styles/streets-v12-local.json');
+              return;
+            }
+            if (isBlankStyleLoaded()) {
+              addLocalRaster(`/tiles/{z}/{x}/{y}.png${cacheParam}`, localTilesMaxZoom);
+            } else {
+              map.once('style.load', () => addLocalRaster(`/tiles/{z}/{x}/{y}.png${cacheParam}`, localTilesMaxZoom));
+              map.setStyle({ version: 8, sources: {}, layers: [] });
+            }
+            return;
+          }
+        }
+
+        // remote styles
+        map.setStyle(remoteStyles[state.style] || remoteStyles.streets);
+        if (state.style === '3d') {
+          map.once('style.load', () => add3dBuildings());
+        }
+      }
+
+      // Set initial display values from URL parameters
+      document.getElementById('zoomVal').textContent = urlZoom.toFixed(2);
+      document.getElementById('locVal').textContent = `${urlLat.toFixed(2)}, ${urlLon.toFixed(2)}`;
+      document.getElementById('cacheIndicator').style.display = urlNocache ? 'block' : 'none';
+      updateLabels();
+      setActiveButtons();
+
+      map.on('load', () => {
+        loadMetrics.mapLoad = performance.now();
+        applySelection();
+        document.getElementById('availabilityHint').textContent =
+          `Local raster: ${hasLocalTiles ? 'available' : 'missing'} | Local satellite: ${hasLocalSat ? 'available' : 'missing'} | Local 3D: ${hasLocal3d ? 'available' : 'missing'}`;
+        renderLoadState('Loading tiles...');
+      });
+
+      map.on('idle', () => {
+        loadMetrics.mapIdle = performance.now();
+        renderLoadState('Map is idle');
+        // Log performance data after a short delay to ensure all data is captured
+        setTimeout(() => {
+          const resources = performance.getEntriesByType('resource');
+          const tileResources = resources.filter(r => (r.name.includes('/tiles/') || r.name.includes('/tiles_sat/') || r.name.includes('/vectors/') || r.name.includes('api.mapbox.com')) && r.startTime >= timingStartTime);
+          const tileBytes = tileResources.reduce((sum, r) => sum + (r.transferSize || r.encodedBodySize || 0), 0);
+          
+          const payload = {
+            session_id: sessionId,
+            source: state.mode,
+            style: state.style,
+            zoom: urlZoom,
+            lat: urlLat,
+            lon: urlLon,
+            windowLoad: loadMetrics.windowLoad,
+            mapLoad: loadMetrics.mapLoad,
+            mapIdle: loadMetrics.mapIdle,
+            lcp: loadMetrics.lcp,
+            tileCount: tileResources.length,
+            totalTileBytes: tileBytes,
+            nocache: urlNocache,
+          };
+          
+          fetch('/log-perf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }).catch(err => console.log('Failed to log perf:', err));
+        }, 500);
+      });
+
+
+      document.getElementById('modeButtons').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-mode]');
+        if (!btn) return;
+        state.mode = btn.dataset.mode;
+        applySelection();
+      });
+
+      document.getElementById('styleButtons').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-style]');
+        if (!btn) return;
+        state.style = btn.dataset.style;
+        applySelection();
+      });
+
+      map.on('zoom', () => {
+        document.getElementById('zoomVal').textContent = map.getZoom().toFixed(2);
+      });
+
+      map.on('move', () => {
+        const center = map.getCenter();
+        document.getElementById('locVal').textContent = `${center.lat.toFixed(2)}, ${center.lng.toFixed(2)}`;
+      });
+
+      const timingDiv = document.getElementById('results');
+      let timingStartTime = performance.now();
+      let maxTileCount = 0;
+      const loadMetrics = {
+        windowLoad: null,
+        mapLoad: null,
+        mapIdle: null,
+        lcp: null
+      };
+
+      function formatMetric(ms) {
+        return ms == null ? '...' : `${ms.toFixed(0)}ms`;
+      }
+
+      function renderLoadState(extra = '') {
+        const ready = loadMetrics.windowLoad != null && loadMetrics.mapIdle != null;
+        timingDiv.textContent = [
+          `Test: Zoom ${urlZoom} | ${urlLat.toFixed(2)}, ${urlLon.toFixed(2)}`,
+          `Mode: ${state.mode === 'local' ? 'Local' : 'Remote'} | Style: ${state.style}`,
+          `Window load: ${formatMetric(loadMetrics.windowLoad)}`,
+          `Map load: ${formatMetric(loadMetrics.mapLoad)}`,
+          `Map idle: ${formatMetric(loadMetrics.mapIdle)}`,
+          `LCP: ${formatMetric(loadMetrics.lcp)}`,
+          `Fully loaded: ${ready ? 'Yes' : 'No'}`,
+          extra
+        ].filter(Boolean).join('\n');
+      }
+
+      try {
+        const lcpObserver = new PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          const last = entries[entries.length - 1];
+          if (last) {
+            loadMetrics.lcp = last.startTime;
+            renderLoadState();
+          }
+        });
+        lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+      } catch (err) {
+        // LCP is not available in every browser/context.
+      }
+
+      window.addEventListener('load', () => {
+        loadMetrics.windowLoad = performance.now();
+        renderLoadState();
+      });
+
+      function updateTimings() {
+        const resources = performance.getEntriesByType('resource');
+        const relevant = resources.filter(r => (r.name.includes('/tiles/') || r.name.includes('/tiles_sat/') || r.name.includes('/vectors/') || r.name.includes('api.mapbox.com')) && r.startTime >= timingStartTime);
+        
+        if (!relevant.length) {
+          renderLoadState('⏳ Loading tiles...');
+          return;
+        }
+
+        // Update max tile count
+        if (relevant.length > maxTileCount) {
+          maxTileCount = relevant.length;
+        }
+
+        // Calculate timing stats
+        let total = 0;
+        let minTime = Infinity;
+        let maxTime = 0;
+        for (const r of relevant) {
+          const duration = r.responseEnd - r.startTime;
+          total += duration;
+          minTime = Math.min(minTime, duration);
+          maxTime = Math.max(maxTime, duration);
+        }
+        const avg = (total / relevant.length).toFixed(1);
+        const totalTime = total.toFixed(0);
+
+        renderLoadState(`Tiles: ${relevant.length}\nTotal: ${totalTime}ms | Avg: ${avg}ms\nMin: ${minTime.toFixed(0)}ms | Max: ${maxTime.toFixed(0)}ms`);
+      }
+      setInterval(updateTimings, 1500);
+    </script>
+  </body>
+</html>

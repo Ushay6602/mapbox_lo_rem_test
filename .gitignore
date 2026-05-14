@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Project runtime artifacts
+projekt/perf_logs/
+projekt/perf_logs_old/
+projekt/tiles/
+projekt/tiles_sat/
+projekt/styles/
+projekt/sprites/
+projekt/glyphs/
+projekt/vectors/
+
+# Root-level cached/generated assets
+tiles/
+tiles_sat/
+styles/
+sprites/
+glyphs/
+vectors/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
